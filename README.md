@@ -43,6 +43,50 @@ Editable source: [`docs/architecture.drawio`](docs/architecture.drawio) (open in
 | S3 results bucket | Private, encrypted, versioned, TLS-only storage for test results |
 | CloudWatch + X-Ray | Logs, metrics and traces |
 
+## Walkthrough (screenshots from the actual run)
+
+> The AWS account ID has been blacked out in every screenshot.
+
+### 1. The function
+
+`LambdaFunctionOverHttps`, triggered by API Gateway, running at the tuned 1024 MB with a 5 second timeout.
+
+<p align="center"><img src="docs/screenshots/01-lambda-configuration.png" width="900" alt="Lambda function configuration at 1024 MB"></p>
+
+### 2. The API
+
+`POST /DynamoDBManager` on the `DynamoDBOperations` REST API, using a non-proxy Lambda integration (Lambda proxy integration = False).
+
+<p align="center"><img src="docs/screenshots/02-api-gateway-method.png" width="900" alt="API Gateway POST method integration"></p>
+
+### 3. The table
+
+`lambda-apigateway`, partition key `id`, on-demand capacity.
+
+<p align="center"><img src="docs/screenshots/03-dynamodb-table.png" width="900" alt="DynamoDB table settings"></p>
+
+### 4. Power Tuning run
+
+The Step Functions execution: the input tests 128, 256, 512 and 1024 MB with 10 invocations each, and the output recommends **1024 MB** at about 50 ms per invocation.
+
+<p align="center"><img src="docs/screenshots/04-power-tuning-execution.png" width="900" alt="Power Tuning Step Functions execution input and output"></p>
+
+<p align="center"><img src="docs/screenshots/05-power-tuning-results.png" width="900" alt="Power Tuning results: 1024 MB best cost and best time"></p>
+
+### 5. Load test at 128 MB
+
+10 virtual users for 2 minutes: 1,930 requests, 410 ms average, 929 ms P99, 0% errors. Note the early spike from cold starts.
+
+<p align="center"><img src="docs/screenshots/06-load-test-128mb.png" width="900" alt="Postman load test at 128 MB"></p>
+
+### 6. Load test at 1024 MB
+
+Same test: 4,277 requests, 169 ms average, 258 ms P99, 0% errors. Faster, and much more consistent.
+
+<p align="center"><img src="docs/screenshots/07-load-test-1024mb.png" width="900" alt="Postman load test at 1024 MB"></p>
+
+The two mistakes I made along the way, with screenshots, are in [docs/load-testing.md](docs/load-testing.md#lessons-learned-mistakes-worth-sharing).
+
 ## Repository layout
 
 ```
@@ -56,6 +100,7 @@ Editable source: [`docs/architecture.drawio`](docs/architecture.drawio) (open in
 │   └── results/                      Summaries of the 128 MB and 1024 MB runs
 ├── scripts/                          deploy, test, set memory, power tuning, upload results, cleanup, charts
 └── docs/                             Architecture, cost optimization, security, custom domain, load testing
+    └── screenshots/                  Console and Postman screenshots from the actual run (account ID redacted)
 ```
 
 ## Deploy

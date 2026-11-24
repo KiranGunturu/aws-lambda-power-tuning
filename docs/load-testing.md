@@ -55,6 +55,23 @@ Raw summaries: `load-testing/results/summary-128mb.json` and `summary-1024mb.jso
 | Requests start failing with 403 partway through a test | WAF rate-based rule blocking the test machine's IP | Raise `WafRateLimit` or set the rule to Count while testing |
 | Some requests fail with 429 | Usage plan or stage throttling, or the account's Lambda concurrency limit (new accounts can be very low) | Check the usage plan, the stage throttling and **Service Quotas > Lambda > Concurrent executions** |
 
+### Mistake 1: using the API ARN as the URL
+
+The ARN from the API Gateway console looks like an address, but it isn't one. Postman read `arn:aws:execute-api:us-west-2` as a host and port and refused to send the request.
+
+<p align="center"><img src="screenshots/08-mistake-arn-instead-of-url.png" width="850" alt="Postman error when using the API ARN as the URL"></p>
+
+### Mistake 2: load testing an unsaved request
+
+After fixing the URL, a single request returned 200, but the performance run showed **100% errors with a 1 ms response time**. The runner was still using the saved request with the ARN. A 1 ms response is the giveaway: nothing ever left the machine.
+
+<p align="center"><img src="screenshots/09-mistake-unsaved-request-100-percent-errors.png" width="850" alt="Postman performance run with 100 percent errors"></p>
+
+### The successful runs
+
+<p align="center"><img src="screenshots/06-load-test-128mb.png" width="850" alt="Postman load test at 128 MB"></p>
+<p align="center"><img src="screenshots/07-load-test-1024mb.png" width="850" alt="Postman load test at 1024 MB"></p>
+
 ## Store the results in S3
 
 ```bash

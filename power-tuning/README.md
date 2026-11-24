@@ -32,6 +32,12 @@
 
 ![Power Tuning results](../docs/images/power-tuning-results.png)
 
+The actual run (account ID blacked out):
+
+![Power Tuning execution](../docs/screenshots/04-power-tuning-execution.png)
+
+![Power Tuning visualization](../docs/screenshots/05-power-tuning-results.png)
+
 > Power Tuning durations here are longer than the load test response times at 128 MB because each Power Tuning batch includes cold starts on freshly published versions, and only 10 invocations are averaged. The load test averages almost 2,000 mostly warm requests. Both show the same trend.
 
 Running Power Tuning itself is cheap: this run cost about $0.00045 in Step Functions and $0.00012 in Lambda.
