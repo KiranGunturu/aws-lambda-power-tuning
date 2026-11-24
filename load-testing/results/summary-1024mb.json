@@ -1,0 +1,17 @@
+{
+  "testName": "KG #6",
+  "tool": "Postman Performance (collection runner)",
+  "date": "2026-11-24T16:55:45-05:00",
+  "lambdaMemoryMB": 1024,
+  "profile": { "type": "ramp-up", "virtualUsers": 10, "durationMinutes": 2, "rampUpSeconds": 30 },
+  "request": { "method": "POST", "path": "/DynamoDBManager", "body": { "operation": "list", "tableName": "lambda-apigateway", "payload": {} } },
+  "totalRequests": 4277,
+  "requestsPerSecond": 35.35,
+  "avgResponseMs": 169,
+  "p90Ms": 180,
+  "p95Ms": 187,
+  "p99Ms": 258,
+  "errorPercent": 0.0,
+  "failurePercent": 0.0,
+  "notes": "Response times are measured by Postman from the client and include the network round trip to us-west-2. Peak CPU and memory in the Postman report describe the client machine, not Lambda."
+}

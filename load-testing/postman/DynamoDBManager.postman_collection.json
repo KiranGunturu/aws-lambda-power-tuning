@@ -1,0 +1,139 @@
+{
+  "info": {
+    "name": "DynamoDBManager - Lambda power tuning demo",
+    "description": "Requests used for functional testing and the Postman performance (load) test.\n\nSet `baseUrl` and `apiKey` in the environment before running. The load test uses only the **List items** request.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "x-api-key", "type": "string" },
+      { "key": "value", "value": "{{apiKey}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "event": [
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.test('responds in under 1 second', () => pm.expect(pm.response.responseTime).to.be.below(1000));"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "Load test",
+      "item": [
+        {
+          "name": "List items",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', () => pm.response.to.have.status(200));",
+                  "pm.test('returns an Items array', () => pm.expect(pm.response.json().Items).to.be.an('array'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"operation\": \"list\",\n    \"tableName\": \"lambda-apigateway\",\n    \"payload\": {}\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "CRUD",
+      "item": [
+        {
+          "name": "Create item",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": { "mode": "raw", "raw": "{\n    \"operation\": \"create\",\n    \"payload\": {\n        \"Item\": { \"id\": \"1234ABCD\", \"number\": 5 }\n    }\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Read item",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.test('returns the item', () => pm.expect(pm.response.json().id).to.eql('1234ABCD'));"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": { "mode": "raw", "raw": "{\n    \"operation\": \"read\",\n    \"payload\": { \"Key\": { \"id\": \"1234ABCD\" } }\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Update item",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));", "pm.test('number was updated', () => pm.expect(pm.response.json().number).to.eql(10));"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": { "mode": "raw", "raw": "{\n    \"operation\": \"update\",\n    \"payload\": {\n        \"Key\": { \"id\": \"1234ABCD\" },\n        \"UpdateExpression\": \"SET #n = :n\",\n        \"ExpressionAttributeNames\": { \"#n\": \"number\" },\n        \"ExpressionAttributeValues\": { \":n\": 10 }\n    }\n}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Delete item",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 200', () => pm.response.to.have.status(200));"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": { "mode": "raw", "raw": "{\n    \"operation\": \"delete\",\n    \"payload\": { \"Key\": { \"id\": \"1234ABCD\" } }\n}", "options": { "raw": { "language": "json" } } }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Security checks",
+      "item": [
+        {
+          "name": "No API key is rejected (403)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 403', () => pm.response.to.have.status(403));"] } }],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": { "mode": "raw", "raw": "{ \"operation\": \"list\", \"payload\": {} }", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Unknown operation is rejected (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 400', () => pm.response.to.have.status(400));"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": { "mode": "raw", "raw": "{ \"operation\": \"dropTable\", \"payload\": {} }", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "Other table is rejected (400)",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('status is 400', () => pm.response.to.have.status(400));"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": { "raw": "{{baseUrl}}/DynamoDBManager", "host": ["{{baseUrl}}"], "path": ["DynamoDBManager"] },
+            "body": { "mode": "raw", "raw": "{ \"operation\": \"list\", \"tableName\": \"some-other-table\", \"payload\": {} }", "options": { "raw": { "language": "json" } } }
+          }
+        }
+      ]
+    }
+  ]
+}

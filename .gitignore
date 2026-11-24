@@ -1,0 +1,17 @@
+# Build output
+.build/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets: never commit a filled-in Postman environment or API keys
+*.local.postman_environment.json
+*.env
+.env*
+
+# Raw tool output that may include account IDs
+power-tuning/last-output.json
+
+.DS_Store
+.vscode/
+.idea/

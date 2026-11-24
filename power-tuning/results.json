@@ -1,0 +1,33 @@
+{
+  "tool": "AWS Lambda Power Tuning (open source, deployed as a Step Functions state machine)",
+  "function": "LambdaFunctionOverHttps",
+  "region": "us-west-2",
+  "architecture": "x86_64",
+  "strategy": "cost",
+  "invocationsPerMemorySetting": 10,
+  "parallelInvocation": true,
+  "pricingUsedForEstimates": {
+    "usdPerGbSecond": 0.0000166667,
+    "note": "Estimated compute cost = memory (GB) x average duration (s) x price. Excludes the $0.20 per 1M request charge, which is the same at every memory size."
+  },
+  "results": [
+    { "memoryMB": 128,  "avgDurationMs": 2136.58, "estimatedCostPerInvocationUSD": 0.00000445 },
+    { "memoryMB": 256,  "avgDurationMs": 644.86,  "estimatedCostPerInvocationUSD": 0.00000269 },
+    { "memoryMB": 512,  "avgDurationMs": 214.95,  "estimatedCostPerInvocationUSD": 0.00000179 },
+    { "memoryMB": 1024, "avgDurationMs": 50.25,   "estimatedCostPerInvocationUSD": 0.00000084 }
+  ],
+  "toolOutput": {
+    "power": 1024,
+    "cost": 8.568e-7,
+    "duration": 50.248333333333335,
+    "stateMachine": {
+      "executionCost": 0.00045,
+      "lambdaCost": 0.0001189293
+    }
+  },
+  "notes": [
+    "Durations were decoded from the Power Tuning visualization link produced by the run.",
+    "The tool's own cost figure for 1024 MB (8.568e-7) is slightly higher than the estimate above because Lambda bills each invocation's duration rounded up to the nearest millisecond.",
+    "Best cost and best time were both 1024 MB, the largest value tested. Re-run with 1536, 2048 and 3008 MB to find where the curve flattens."
+  ]
+}

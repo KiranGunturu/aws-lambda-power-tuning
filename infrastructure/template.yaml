@@ -1,0 +1,535 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Lambda power tuning demo - API Gateway (REST) -> Lambda -> DynamoDB, secured with
+  an API key, usage plan throttling, request validation and AWS WAF, with an
+  optional custom domain and an S3 bucket for load test results.
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label: { default: "Naming" }
+        Parameters: [ProjectName, FunctionName, TableName, StageName]
+      - Label: { default: "Lambda" }
+        Parameters: [LambdaMemorySize, LambdaArchitecture, LambdaTimeout, LogRetentionDays]
+      - Label: { default: "API security" }
+        Parameters: [ThrottleRateLimit, ThrottleBurstLimit, MonthlyQuota, EnableWaf, WafRateLimit, ConfigureApiGatewayLoggingRole]
+      - Label: { default: "Custom domain (optional)" }
+        Parameters: [CustomDomainName, HostedZoneId, DisableDefaultEndpoint]
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: lambda-power-tuning-demo
+    AllowedPattern: "^[a-z0-9-]{3,40}$"
+    Description: Lowercase prefix used for resource names (also used in the S3 bucket name).
+  FunctionName:
+    Type: String
+    Default: LambdaFunctionOverHttps
+  TableName:
+    Type: String
+    Default: lambda-apigateway
+  StageName:
+    Type: String
+    Default: prod
+    AllowedPattern: "^[a-zA-Z0-9_]+$"
+
+  LambdaMemorySize:
+    Type: Number
+    Default: 1024
+    AllowedValues: [128, 256, 512, 1024, 1536, 2048, 3008]
+    Description: 1024 MB was both the fastest and cheapest setting in our Power Tuning run.
+  LambdaArchitecture:
+    Type: String
+    Default: x86_64
+    AllowedValues: [x86_64, arm64]
+    Description: The tests in this repo ran on x86_64. arm64 (Graviton) is about 20% cheaper per GB-second.
+  LambdaTimeout:
+    Type: Number
+    Default: 5
+    MinValue: 1
+    MaxValue: 29
+    Description: Seconds. Keep it below the 29 second API Gateway integration timeout.
+  LogRetentionDays:
+    Type: Number
+    Default: 30
+    AllowedValues: [1, 3, 5, 7, 14, 30, 60, 90, 180, 365]
+
+  ThrottleRateLimit:
+    Type: Number
+    Default: 50
+    Description: Steady-state requests per second allowed per API key (usage plan) and per method (stage).
+  ThrottleBurstLimit:
+    Type: Number
+    Default: 100
+  MonthlyQuota:
+    Type: Number
+    Default: 1000000
+    Description: Maximum requests per month per API key.
+  EnableWaf:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+  WafRateLimit:
+    Type: Number
+    Default: 2000
+    MinValue: 10
+    Description: >-
+      Max requests per client IP in any 5 minute window before WAF blocks it.
+      A load test from one machine can exceed this; raise it while testing.
+  ConfigureApiGatewayLoggingRole:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Sets the account-level CloudWatch Logs role that API Gateway needs for logging.
+      This is one setting per account and Region. Set to false if your account already has one.
+
+  CustomDomainName:
+    Type: String
+    Default: ""
+    Description: Optional, e.g. api.example.com. Leave empty to skip the custom domain.
+  HostedZoneId:
+    Type: String
+    Default: ""
+    Description: Route 53 public hosted zone ID for the custom domain. Required if CustomDomainName is set.
+  DisableDefaultEndpoint:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: When using a custom domain, set to true so clients can only call the API through it.
+
+Conditions:
+  HasCustomDomain: !And
+    - !Not [!Equals [!Ref CustomDomainName, ""]]
+    - !Not [!Equals [!Ref HostedZoneId, ""]]
+  CreateWaf: !Equals [!Ref EnableWaf, "true"]
+  CreateApiGatewayAccount: !Equals [!Ref ConfigureApiGatewayLoggingRole, "true"]
+  DisableExecuteApi: !And
+    - !Condition HasCustomDomain
+    - !Equals [!Ref DisableDefaultEndpoint, "true"]
+
+Resources:
+  # ---------------------------------------------------------------- Data
+  Table:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: !Ref TableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: id, KeyType: HASH }
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  # ---------------------------------------------------------------- Lambda
+  FunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${FunctionName}"
+      RetentionInDays: !Ref LogRetentionDays
+
+  FunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+      Policies:
+        - PolicyName: least-privilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: WriteOwnLogsOnly
+                Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${FunctionLogGroup.Arn}"
+              - Sid: OneTableOnly
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                Resource: !GetAtt Table.Arn
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  Function:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref FunctionName
+      Description: DynamoDB CRUD behind API Gateway, used for the power tuning and load tests.
+      Runtime: python3.13
+      Handler: lambda_function.lambda_handler
+      Code: ../src            # packaged and uploaded by `aws cloudformation package` (see scripts/deploy.sh)
+      Role: !GetAtt FunctionRole.Arn
+      MemorySize: !Ref LambdaMemorySize
+      Timeout: !Ref LambdaTimeout
+      Architectures: [!Ref LambdaArchitecture]
+      TracingConfig:
+        Mode: Active
+      LoggingConfig:
+        LogGroup: !Ref FunctionLogGroup
+        LogFormat: Text
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref Table
+          MAX_LIST_ITEMS: "100"
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  # ---------------------------------------------------------------- API Gateway
+  Api:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: DynamoDBOperations
+      Description: REST API in front of LambdaFunctionOverHttps
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      DisableExecuteApiEndpoint: !If [DisableExecuteApi, true, false]
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  ApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref Api
+      ParentId: !GetAtt Api.RootResourceId
+      PathPart: DynamoDBManager
+
+  BodyValidator:
+    Type: AWS::ApiGateway::RequestValidator
+    Properties:
+      RestApiId: !Ref Api
+      Name: validate-body
+      ValidateRequestBody: true
+      ValidateRequestParameters: false
+
+  RequestModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      RestApiId: !Ref Api
+      Name: DynamoDBManagerRequest
+      ContentType: application/json
+      Schema:
+        $schema: "http://json-schema.org/draft-04/schema#"
+        title: DynamoDBManagerRequest
+        type: object
+        required: [operation]
+        additionalProperties: false
+        properties:
+          operation:
+            type: string
+            enum: [create, read, update, delete, list, echo, ping]
+          tableName:
+            type: string
+            maxLength: 255
+          payload:
+            type: object
+
+  PostMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref Api
+      ResourceId: !Ref ApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      ApiKeyRequired: true
+      RequestValidatorId: !Ref BodyValidator
+      RequestModels:
+        application/json: !Ref RequestModel
+      Integration:
+        Type: AWS                      # non-proxy Lambda integration (Lambda proxy integration = False)
+        IntegrationHttpMethod: POST
+        Uri: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Function.Arn}/invocations"
+        PassthroughBehavior: WHEN_NO_MATCH
+        TimeoutInMillis: 29000
+        IntegrationResponses:
+          - StatusCode: "200"
+          - StatusCode: "400"
+            SelectionPattern: ".*\\[BadRequest\\].*"
+            ResponseTemplates:
+              application/json: '{"error": "$util.escapeJavaScript($input.path(''$.errorMessage''))"}'
+          - StatusCode: "500"
+            SelectionPattern: "(.*\\[InternalError\\].*)|(.*Task timed out.*)"
+            ResponseTemplates:
+              application/json: '{"error": "Internal error"}'
+      MethodResponses:
+        - { StatusCode: "200", ResponseModels: { application/json: Empty } }
+        - { StatusCode: "400", ResponseModels: { application/json: Error } }
+        - { StatusCode: "500", ResponseModels: { application/json: Error } }
+
+  InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref Function
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/POST/DynamoDBManager"
+
+  ApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Condition: CreateApiGatewayAccount
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: apigateway.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  ApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Condition: CreateApiGatewayAccount
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayCloudWatchRole.Arn
+
+  AccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: !Sub "/aws/apigateway/${ProjectName}-access"
+      RetentionInDays: !Ref LogRetentionDays
+
+  Deployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: [PostMethod]
+    Properties:
+      RestApiId: !Ref Api
+      Description: Initial deployment. Run `aws apigateway create-deployment` after changing methods.
+
+  Stage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref Api
+      DeploymentId: !Ref Deployment
+      StageName: !Ref StageName
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingRateLimit: !Ref ThrottleRateLimit
+          ThrottlingBurstLimit: !Ref ThrottleBurstLimit
+          MetricsEnabled: true
+          LoggingLevel: ERROR
+          DataTraceEnabled: false       # never log full request/response bodies
+      AccessLogSetting:
+        DestinationArn: !GetAtt AccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","ip":"$context.identity.sourceIp","apiKeyId":"$context.identity.apiKeyId","method":"$context.httpMethod","path":"$context.resourcePath","status":"$context.status","latencyMs":"$context.responseLatency","integrationLatencyMs":"$context.integrationLatency","wafStatus":"$context.waf.status","time":"$context.requestTime"}'
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn: Stage
+    Properties:
+      Name: !Sub "${ProjectName}-client"
+      Enabled: true
+      Description: Key for Postman and the load test. Rotate by creating a new key and deleting this one.
+
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: Stage
+    Properties:
+      UsagePlanName: !Sub "${ProjectName}-plan"
+      ApiStages:
+        - ApiId: !Ref Api
+          Stage: !Ref StageName
+      Throttle:
+        RateLimit: !Ref ThrottleRateLimit
+        BurstLimit: !Ref ThrottleBurstLimit
+      Quota:
+        Limit: !Ref MonthlyQuota
+        Period: MONTH
+
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref ApiKey
+      KeyType: API_KEY
+      UsagePlanId: !Ref UsagePlan
+
+  # ---------------------------------------------------------------- WAF
+  WebAcl:
+    Type: AWS::WAFv2::WebACL
+    Condition: CreateWaf
+    Properties:
+      Name: !Sub "${ProjectName}-api-acl"
+      Scope: REGIONAL
+      DefaultAction: { Allow: {} }
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: !Sub "${ProjectName}-api-acl"
+      Rules:
+        - Name: RateLimitPerIp
+          Priority: 0
+          Action: { Block: {} }
+          Statement:
+            RateBasedStatement:
+              Limit: !Ref WafRateLimit
+              AggregateKeyType: IP
+          VisibilityConfig: { SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: RateLimitPerIp }
+        - Name: AWSManagedRulesAmazonIpReputationList
+          Priority: 1
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement: { VendorName: AWS, Name: AWSManagedRulesAmazonIpReputationList }
+          VisibilityConfig: { SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: IpReputation }
+        - Name: AWSManagedRulesCommonRuleSet
+          Priority: 2
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement: { VendorName: AWS, Name: AWSManagedRulesCommonRuleSet }
+          VisibilityConfig: { SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: CommonRuleSet }
+        - Name: AWSManagedRulesKnownBadInputsRuleSet
+          Priority: 3
+          OverrideAction: { None: {} }
+          Statement:
+            ManagedRuleGroupStatement: { VendorName: AWS, Name: AWSManagedRulesKnownBadInputsRuleSet }
+          VisibilityConfig: { SampledRequestsEnabled: true, CloudWatchMetricsEnabled: true, MetricName: KnownBadInputs }
+
+  WebAclAssociation:
+    Type: AWS::WAFv2::WebACLAssociation
+    Condition: CreateWaf
+    DependsOn: Stage
+    Properties:
+      ResourceArn: !Sub "arn:${AWS::Partition}:apigateway:${AWS::Region}::/restapis/${Api}/stages/${StageName}"
+      WebACLArn: !GetAtt WebAcl.Arn
+
+  # ---------------------------------------------------------------- Custom domain (optional)
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Ref CustomDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref CustomDomainName
+          HostedZoneId: !Ref HostedZoneId     # CloudFormation creates the validation record for you
+
+  ApiDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Condition: HasCustomDomain
+    Properties:
+      DomainName: !Ref CustomDomainName
+      RegionalCertificateArn: !Ref Certificate
+      EndpointConfiguration:
+        Types: [REGIONAL]
+      SecurityPolicy: TLS_1_2
+
+  ApiBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: HasCustomDomain
+    DependsOn: Stage
+    Properties:
+      DomainName: !Ref ApiDomainName
+      RestApiId: !Ref Api
+      Stage: !Ref StageName
+
+  ApiDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasCustomDomain
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref CustomDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt ApiDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt ApiDomainName.RegionalHostedZoneId
+        EvaluateTargetHealth: false
+
+  # ---------------------------------------------------------------- Load test results
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${ProjectName}-results-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: tier-and-expire
+            Status: Enabled
+            Transitions:
+              - { StorageClass: STANDARD_IA, TransitionInDays: 30 }
+            NoncurrentVersionExpiration: { NoncurrentDays: 30 }
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 7 }
+      Tags:
+        - { Key: Project, Value: !Ref ProjectName }
+
+  ResultsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ResultsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ResultsBucket.Arn
+              - !Sub "${ResultsBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+Outputs:
+  InvokeUrl:
+    Description: Default API endpoint (POST)
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${StageName}/DynamoDBManager"
+  CustomDomainUrl:
+    Condition: HasCustomDomain
+    Description: Custom domain endpoint (POST)
+    Value: !Sub "https://${CustomDomainName}/DynamoDBManager"
+  ApiId:
+    Value: !Ref Api
+  StageName:
+    Value: !Ref StageName
+  ApiKeyId:
+    Description: "Get the key value with: aws apigateway get-api-key --api-key <id> --include-value --query value --output text"
+    Value: !Ref ApiKey
+  FunctionArn:
+    Description: Use this as lambdaARN in the Power Tuning input
+    Value: !GetAtt Function.Arn
+  FunctionNameOut:
+    Value: !Ref Function
+  TableNameOut:
+    Value: !Ref Table
+  ResultsBucketName:
+    Value: !Ref ResultsBucket
+  WebAclArn:
+    Condition: CreateWaf
+    Value: !GetAtt WebAcl.Arn
