@@ -13,35 +13,37 @@
 
 ## Test plan
 
-Run the same profile twice, changing only the memory:
+Run the same profile at each memory size, changing only the memory:
 
 ```bash
 ./scripts/set-memory.sh 128     # run the test
-./scripts/set-memory.sh 1024    # run the test again
+./scripts/set-memory.sh 512     # run the test again
+./scripts/set-memory.sh 1024    # and again
 ```
 
-Wait a minute after each memory change. Updating the configuration creates fresh execution environments, so both runs start cold in the same way.
+Wait a minute after each memory change. Updating the configuration creates fresh execution environments, so every run starts cold in the same way.
 
 ## Results
 
-| Metric | 128 MB | 1024 MB | Change |
-|---|---|---|---|
-| Requests served | 1,930 | 4,277 | 2.2x more |
-| Requests per second | 15.9 | 35.4 | 2.2x more |
-| Average response | 410 ms | 169 ms | 2.4x faster |
-| P90 | 446 ms | 180 ms | 2.5x faster |
-| P95 | 488 ms | 187 ms | 2.6x faster |
-| P99 | 929 ms | 258 ms | 3.6x faster |
-| Errors | 0% | 0% | |
+| Metric | 128 MB | 512 MB | 1024 MB | 128 → 1024 MB |
+|---|---|---|---|---|
+| Requests served | 1,930 | 3,746 | 4,277 | 2.2x more |
+| Requests per second | 15.9 | 32.4 | 35.4 | 2.2x more |
+| Average response | 410 ms | 196 ms | 169 ms | 2.4x faster |
+| P90 | 446 ms | 213 ms | 180 ms | 2.5x faster |
+| P95 | 488 ms | 226 ms | 187 ms | 2.6x faster |
+| P99 | 929 ms | 325 ms | 258 ms | 3.6x faster |
+| Errors | 0% | 0% | 0% | |
 
 ![Load test results](images/load-test-results.png)
 
-Raw summaries: `load-testing/results/summary-128mb.json` and `summary-1024mb.json`.
+Raw summaries: `load-testing/results/summary-128mb.json`, `summary-512mb.json` and `summary-1024mb.json`.
 
 ### Reading the numbers
 
 - **P90 / P95 / P99** mean 90%, 95% and 99% of requests finished faster than that value. They show what the slowest users experience, which an average hides.
 - **The tail improved most.** At 128 MB the gap between P90 and P99 was 483 ms (cold starts and CPU-starved requests). At 1024 MB it was 78 ms, so almost every user got the same fast response.
+- **Most of the gain arrives by 512 MB.** Going from 128 to 512 MB cut the average from 410 to 196 ms. Going on to 1024 MB saved another 27 ms on average and 67 ms at P99. The fastest request at 512 MB took 157 ms, which is close to the network round trip from the test machine, so there's little left to gain in end-to-end latency. Inside the function, Power Tuning still shows 1024 MB as both faster and cheaper.
 - **Throughput rose with the same 10 users** because each user waits for a response before sending the next request. Faster responses mean more requests in the same two minutes.
 - **Response time includes the network.** Postman measures from the client machine to us-west-2 and back. For time spent inside the function only, use the Lambda **Duration** metric in CloudWatch.
 - **Peak CPU and memory in the Postman report describe the client machine, not Lambda.**
@@ -70,6 +72,7 @@ After fixing the URL, a single request returned 200, but the performance run sho
 ### The successful runs
 
 <p align="center"><img src="screenshots/06-load-test-128mb.png" width="850" alt="Postman load test at 128 MB"></p>
+<p align="center"><img src="screenshots/06b-load-test-512mb.png" width="850" alt="Postman load test at 512 MB"></p>
 <p align="center"><img src="screenshots/07-load-test-1024mb.png" width="850" alt="Postman load test at 1024 MB"></p>
 
 ## Store the results in S3

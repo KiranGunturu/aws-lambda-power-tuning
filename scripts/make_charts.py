@@ -50,14 +50,15 @@ def load_test():
     runs.sort(key=lambda r: r["lambdaMemoryMB"])
     metrics = [("avgResponseMs", "Average"), ("p90Ms", "P90"), ("p95Ms", "P95"), ("p99Ms", "P99")]
     fig, ax = plt.subplots(figsize=(12, 6.3), dpi=150)
-    width = 0.36
-    colors = [LIGHT, NAVY]
+    n = len(runs)
+    width = 0.8 / n
+    colors = [LIGHT, ORANGE, NAVY][-n:] if n <= 3 else [LIGHT] * (n - 1) + [NAVY]
     for i, run in enumerate(runs):
-        xs = [j + (i - 0.5) * width for j in range(len(metrics))]
+        xs = [j + (i - (n - 1) / 2) * width for j in range(len(metrics))]
         vals = [run[k] for k, _ in metrics]
-        bars = ax.bar(xs, vals, width, color=colors[i % 2], label=f'{run["lambdaMemoryMB"]} MB  ({run["totalRequests"]:,} requests, {run["errorPercent"]:.0f}% errors)')
+        bars = ax.bar(xs, vals, width, color=colors[i], label=f'{run["lambdaMemoryMB"]} MB  ({run["totalRequests"]:,} requests, {run["errorPercent"]:.0f}% errors)')
         for b, v in zip(bars, vals):
-            ax.text(b.get_x() + b.get_width() / 2, v + 12, f"{v:,.0f}", ha="center", color=NAVY if i else GREY, fontweight="bold")
+            ax.text(b.get_x() + b.get_width() / 2, v + 12, f"{v:,.0f}", ha="center", color=GREY if colors[i] == LIGHT else colors[i], fontweight="bold", fontsize=11)
     ax.set_xticks(range(len(metrics)), [m for _, m in metrics])
     ax.set_ylabel("Response time (ms)")
     ax.spines[["top", "right"]].set_visible(False)

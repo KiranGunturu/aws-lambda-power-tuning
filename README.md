@@ -7,22 +7,24 @@ Most people assume that giving a Lambda function more memory makes it more expen
 A REST API on Amazon API Gateway calls a Lambda function that reads from DynamoDB. The same function was:
 
 1. **Tuned** with [AWS Lambda Power Tuning](https://github.com/alexcasalboni/aws-lambda-power-tuning) at 128, 256, 512 and 1024 MB.
-2. **Load tested** with Postman at 128 MB and 1024 MB, with 10 virtual users for 2 minutes each.
+2. **Load tested** with Postman at 128, 512 and 1024 MB, with 10 virtual users for 2 minutes each.
 
 Everything is deployable with one CloudFormation stack, including the API security layers, an optional custom domain and an S3 bucket for the test results.
 
 ## Results at a glance
 
-| | 128 MB | 1024 MB | |
-|---|---|---|---|
-| Avg duration (Power Tuning) | 2,137 ms | **50 ms** | 42x faster |
-| Compute cost per 1M calls | $4.45 | **$0.84** | 81% cheaper |
-| Avg response (load test) | 410 ms | **169 ms** | 2.4x faster |
-| P99 response (load test) | 929 ms | **258 ms** | 3.6x faster |
-| Requests served in 2 min | 1,930 | **4,277** | 2.2x more |
-| Errors | 0% | 0% | |
+| | 128 MB | 512 MB | 1024 MB | 128 → 1024 MB |
+|---|---|---|---|---|
+| Avg duration (Power Tuning) | 2,137 ms | 215 ms | **50 ms** | 42x faster |
+| Compute cost per 1M calls | $4.45 | $1.79 | **$0.84** | 81% cheaper |
+| Avg response (load test) | 410 ms | 196 ms | **169 ms** | 2.4x faster |
+| P99 response (load test) | 929 ms | 325 ms | **258 ms** | 3.6x faster |
+| Requests served in 2 min | 1,930 | 3,746 | **4,277** | 2.2x more |
+| Errors | 0% | 0% | 0% | |
 
 **8x the memory, about 81% lower compute cost.** In Lambda, memory also controls CPU, and you pay for allocated memory multiplied by duration. When duration drops faster than memory rises, the bill goes down.
+
+512 MB already gets most of the speed-up in the load test, but 1024 MB is still faster at the tail and costs about half as much per call, so 1024 MB is the setting we kept.
 
 <p align="center"><img src="docs/images/power-tuning-results.png" width="900" alt="Power Tuning results"></p>
 <p align="center"><img src="docs/images/load-test-results.png" width="900" alt="Load test results"></p>
@@ -79,7 +81,13 @@ The Step Functions execution: the input tests 128, 256, 512 and 1024 MB with 10 
 
 <p align="center"><img src="docs/screenshots/06-load-test-128mb.png" width="900" alt="Postman load test at 128 MB"></p>
 
-### 6. Load test at 1024 MB
+### 6. Load test at 512 MB
+
+Same test: 3,746 requests, 196 ms average, 325 ms P99, 0% errors. Most of the improvement already shows up here.
+
+<p align="center"><img src="docs/screenshots/06b-load-test-512mb.png" width="900" alt="Postman load test at 512 MB"></p>
+
+### 7. Load test at 1024 MB
 
 Same test: 4,277 requests, 169 ms average, 258 ms P99, 0% errors. Faster, and much more consistent.
 
@@ -97,7 +105,7 @@ The two mistakes I made along the way, with screenshots, are in [docs/load-testi
 ├── power-tuning/                     Power Tuning input, results and notes
 ├── load-testing/
 │   ├── postman/                      Collection and environment template
-│   └── results/                      Summaries of the 128 MB and 1024 MB runs
+│   └── results/                      Summaries of the 128, 512 and 1024 MB runs
 ├── scripts/                          deploy, test, set memory, power tuning, upload results, cleanup, charts
 └── docs/                             Architecture, cost optimization, security, custom domain, load testing
     └── screenshots/                  Console and Postman screenshots from the actual run (account ID redacted)
