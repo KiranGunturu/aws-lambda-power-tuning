@@ -1,5 +1,7 @@
 # AWS Lambda Power Tuning: faster *and* cheaper with more memory
 
+<p align="center"><img src="docs/images/architecture.png" width="1000" alt="Architecture: Postman, Route 53, AWS WAF, API Gateway, Lambda, DynamoDB, Lambda Power Tuning, S3 results bucket"></p>
+
 Most people assume that giving a Lambda function more memory makes it more expensive. This project tests that assumption on a real API and shows it isn't always true.
 
 A REST API on Amazon API Gateway calls a Lambda function that reads from DynamoDB. The same function was:
@@ -27,9 +29,7 @@ Everything is deployable with one CloudFormation stack, including the API securi
 
 ## Architecture
 
-<p align="center"><img src="docs/images/architecture.png" width="1000" alt="Architecture"></p>
-
-Editable source: [`docs/architecture.drawio`](docs/architecture.drawio) (open in [diagrams.net](https://app.diagrams.net)).
+The diagram at the top shows the full setup. Editable source: [`docs/architecture.drawio`](docs/architecture.drawio) (open in [diagrams.net](https://app.diagrams.net)).
 
 | Component | Role |
 |---|---|
