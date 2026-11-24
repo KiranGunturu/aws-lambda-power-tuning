@@ -2,14 +2,22 @@
 
 <p align="center"><img src="docs/images/architecture.png" width="1000" alt="Architecture: Postman, Route 53, AWS WAF, API Gateway, Lambda, DynamoDB, Lambda Power Tuning, S3 results bucket"></p>
 
-Most people assume that giving a Lambda function more memory makes it more expensive. This project tests that assumption on a real API and shows it isn't always true.
+## What this project is about
 
-A REST API on Amazon API Gateway calls a Lambda function that reads from DynamoDB. The same function was:
+A serverless API (Amazon API Gateway → AWS Lambda → Amazon DynamoDB), tuned, load tested and secured end to end. It answers one question with real data: **does giving a Lambda function more memory always cost more?** For this function, it doesn't. More memory made it faster *and* cheaper.
 
-1. **Tuned** with [AWS Lambda Power Tuning](https://github.com/alexcasalboni/aws-lambda-power-tuning) at 128, 256, 512 and 1024 MB.
-2. **Load tested** with Postman at 128, 512 and 1024 MB, with 10 virtual users for 2 minutes each.
+What's covered:
 
-Everything is deployable with one CloudFormation stack, including the API security layers, an optional custom domain and an S3 bucket for the test results.
+| Area | What was done |
+|---|---|
+| **Lambda Power Tuning** | Ran the open-source [AWS Lambda Power Tuning](https://github.com/alexcasalboni/aws-lambda-power-tuning) state machine at 128, 256, 512 and 1024 MB to find the cheapest and fastest setting |
+| **API load testing** | Load tested the API with Postman at **three memory settings** (128, 512 and 1024 MB): same request, 10 virtual users, 2 minutes each |
+| **Cost optimization** | Compared cost per call at each memory size, projected monthly cost, and looked at the full bill (API Gateway, WAF, DynamoDB) |
+| **API security** | AWS WAF (rate limiting and managed rules), API key with usage plan and quota, throttling, request validation, least-privilege IAM, encryption |
+| **Custom domain** | `api.example.com` on API Gateway with an ACM certificate (automatic DNS validation) and a Route 53 alias record |
+| **Test results in S3** | Postman and Power Tuning results stored in a private, encrypted, versioned S3 bucket |
+| **Infrastructure as code** | Everything deploys from one CloudFormation template, with scripts to deploy, test, tune, upload results and clean up |
+| **Observability** | CloudWatch access logs and metrics, plus X-Ray tracing on API Gateway and Lambda |
 
 ## Results at a glance
 
